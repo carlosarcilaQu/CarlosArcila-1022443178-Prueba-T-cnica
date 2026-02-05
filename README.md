@@ -1,54 +1,49 @@
-# CarlosArcila-1022443178-Prueba-T-cnica
-API para gestión de vehículos, mercados/locations y reservas (con validación de disponibilidad por rango de fechas), implementada con Clean Architecture y buenas prácticas (SOLID, DRY, KISS) [web:310].
+# CarlosArcila-1022443178-Prueba-Tecnica
+# Outlet Rental Cars — Vehicle Search API
 
-## Tech stack
-- .NET (ASP.NET Core Web API) [web:310]
-- Entity Framework Core + MySQL (Pomelo) en **Infrastructure**
-- Swagger/OpenAPI (Swashbuckle)
+Web API para buscar vehículos disponibles y crear reservas, aplicando reglas de negocio del dominio de renta de vehículos y alineada con Clean Architecture + SOLID/DRY/KISS [file:1].
 
-## Arquitectura
-La solución está organizada en 4 capas:
+## Descripción de la solución
+La API expone:
+- Un **endpoint de búsqueda** (Query) para retornar vehículos disponibles dado: localidad de recogida, localidad de devolución, fecha/hora de recogida y fecha/hora de devolución [file:1].
+- Un **endpoint de creación de reserva** (Command) que valida disponibilidad y genera un evento de dominio `VehicleReservedEvent` manejado internamente in-memory (sin bus externo) [file:1].
 
-- `OutletRentalCars.Domain`: Entidades, value objects, enums y eventos de dominio (sin dependencias externas).
-- `OutletRentalCars.Application`: Casos de uso, puertos (interfaces), validaciones y contratos; **no depende de EF Core** (DIP/Clean Architecture).  
-- `OutletRentalCars.Infrastructure`: Persistencia EF Core, implementaciones de repositorios, DbContext, mapeos y configuración de data access.
-- `OutletRentalCars.Api`: Controllers, DI, pipeline HTTP, Swagger y manejo global de errores con `ProblemDetails` [web:310][web:332].
+Persistencia:
+- **MySQL** para información transaccional: vehículos y reservas [file:1].
+- **MongoDB** para información de catálogo/configuración: mercados, tipos de vehículo, etc. [file:1].
 
-## Reglas de negocio principales
-- Un vehículo solo se puede reservar si está `Available`.
-- El rango de fechas debe ser válido: `PickupAt < DropoffAt`.
-- No se permite una reserva activa que se solape con otra para el mismo vehículo: hay overlap si `existing.PickupAt < new.DropoffAt` y `existing.DropoffAt > new.PickupAt`.
-- La búsqueda de vehículos disponibles filtra por:
-  - Location existente y su country.
-  - Market habilitado para el país.
-  - VehicleTypeCode permitido por el market.
-  - Ausencia de reservas activas solapadas.
+## Reglas de negocio (según la prueba)
+La búsqueda de vehículos disponibles aplica estas reglas [file:1]:
+- Disponibilidad por localidad: el vehículo debe estar disponible en la localidad de recogida; la localidad de devolución puede ser distinta [file:1].
+- Disponibilidad por mercado: solo retornar vehículos habilitados para el país al que pertenece una localidad (catálogo/config) [file:1].
+- Rango de fechas: no retornar vehículos con una **reserva activa** que se cruce con el rango solicitado [file:1].
+- Estado del vehículo: solo retornar vehículos con estado **Disponible** [file:1].
 
-## Manejo de errores (ProblemDetails)
-La API retorna errores en formato `application/problem+json` usando el estándar de Problem Details (RFC 7807) [web:332].
+Overlap (cruce de reservas):
+- Existe cruce si `existing.PickupAt < requested.DropoffAt` y `existing.DropoffAt > requested.PickupAt` (misma regla usada para bloquear disponibilidad).
 
-- `400 Bad Request`: errores de validación (p.ej. rango de fechas inválido).
-- `404 Not Found`: recursos inexistentes (p.ej. vehículo no encontrado).
-- `500 Internal Server Error`: errores no controlados (sin exponer stack trace en ambientes no-dev).
+## Decisiones técnicas tomadas
+- **Clean Architecture**: Domain + Application no dependen de infraestructura; Infrastructure implementa acceso a datos (MySQL/Mongo) y la API orquesta HTTP/DI [file:1].
+- **DI correcto**: Controllers delgados, casos de uso y servicios resueltos por interfaces (DIP).
+- **SOLID/DRY/KISS**: responsabilidades separadas (controllers vs casos de uso vs persistencia), validaciones consistentes y evento in-memory para no introducir complejidad de mensajería (KISS) [file:1].
+- **CQRS ligero**: Query para búsqueda y Command para crear reserva, sin frameworks pesados.
 
-## Endpoints (Swagger)
-Al ejecutar el proyecto, Swagger queda disponible en:
+## Estructura del proyecto
+- `src/OutletRentalCars.Domain`: entidades y enums (ej. `VehicleStatus`, `Reservation`, `ReservationStatus`) [file:222].
+- `src/OutletRentalCars.Application`: casos de uso, comandos/queries (ej. `CreateReservationCommand`), contratos (puertos) y eventos (dispatcher/handlers) [file:221][file:218][file:219].
+- `src/OutletRentalCars.Infrastructure`: EF Core MySQL + repos/servicios + integración con Mongo, y handler del evento.
+- `src/OutletRentalCars.Api`: Controllers, Swagger y pipeline HTTP.
 
-- `http://localhost:<puerto>/swagger`
+## Tutorial: correr la app y las BD (local)
 
-Endpoints típicos:
-- `GET /api/vehicles/search` (búsqueda de vehículos disponibles por location + rango)
-- `POST /api/reservations` (creación de reserva)
+### 1) Requisitos
+- .NET 7 o superior (este repo compila en net10.0).
+- Docker + Docker Compose.
+- Puertos libres: MySQL `3306`, MongoDB `27017` [file:278].
 
-> Nota: Los nombres exactos pueden variar según el controller; Swagger es la fuente de verdad.
+### 2) Levantar MySQL y MongoDB (Docker)
+Desde la raíz del repo:
 
-## Configuración
-### Variables / appsettings
-Configura el connection string de MySQL en `appsettings.Development.json` (o variables de entorno), por ejemplo:
-
-```json
-{
-  "ConnectionStrings": {
-    "Default": "Server=localhost;Port=3306;Database=outlet_rental_cars;User=root;Password=your_password;"
-  }
-}
+```bash
+docker compose up -d
+docker ps
